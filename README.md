@@ -70,3 +70,39 @@ The internal file layout is also an implementation detail; concurrency and
 crash-recovery mechanisms remain deferred by the [specification](docs/spec-v0.1.md).
 Ordinary write failures clean up the newly created file; abrupt process termination
 can leave an incomplete file. This API does not run training or add CLI commands.
+
+## Metadata collection
+
+Collectors reuse the existing models and do not execute training:
+
+```python
+from trainlens.collectors.environment import (
+    collect_environment,
+    collect_python_executable,
+)
+from trainlens.collectors.git import collect_git
+from trainlens.models import RunDiagnostics
+
+diagnostics = RunDiagnostics()
+environment = collect_environment(diagnostics=diagnostics)
+python_executable = collect_python_executable()  # RunRecord.python_executable
+git = collect_git(invocation_cwd)  # The caller supplies the original project cwd.
+```
+
+Environment helpers observe their calling interpreter. The future bootstrap must
+call them in the selected training process. PyTorch is imported only when collecting;
+it is not an installation dependency. Missing imports and query failures preserve
+unknown fields as `None` and append collection warnings, without changing training
+failure information. A PyTorch build without CUDA records CUDA availability as
+false and an empty CUDA GPU inventory.
+
+For CUDA builds, availability and GPU queries are deferred until PyTorch CUDA is
+already initialized. Before that, these fields remain unknown with a warning; a
+later call after script execution can collect them. No helper initializes CUDA,
+allocates tensors, or reads/resets allocator peaks. Device-name query failures keep
+the known device identifier with an unknown name.
+
+Git collection uses the supplied cwd, records the commit and whole-worktree dirty
+state (including staged and untracked changes), and excludes that cwd's `.trainlens`
+subtree. It does not edit Git configuration or ignore files. Missing Git or command
+failures preserve known fields and explain unavailable values through `GitInfo`.
