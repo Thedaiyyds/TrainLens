@@ -168,15 +168,7 @@ class RunStore:
         text.encode("utf-8")
         path = self._path(snapshot.run_id)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
-        if path.exists() or path.is_symlink():
-            raise FileExistsError(
-                f"Run ID already exists: {snapshot.run_id!r} ({path})."
-            )
-        for existing in sorted(self.runs_dir.iterdir()):
-            if existing.suffix != ".json":
-                continue
-            if self.load(existing.stem).name == snapshot.name:
-                raise FileExistsError(f"Run name already exists: {snapshot.name!r}.")
+        self.check_available(snapshot.run_id, snapshot.name)
 
         # Exclusive creation also rejects a duplicate ID appearing after the check.
         stream = path.open("x", encoding="utf-8")
@@ -187,6 +179,19 @@ class RunStore:
             path.unlink(missing_ok=True)
             raise
         return path
+
+    def check_available(self, run_id: str, name: str) -> None:
+        """Read-only preflight; not a reservation or a concurrency guarantee."""
+        path = self._path(run_id)
+        if path.exists() or path.is_symlink():
+            raise FileExistsError(f"Run ID already exists: {run_id!r} ({path}).")
+        if not self.runs_dir.exists():
+            return
+        for existing in sorted(self.runs_dir.iterdir()):
+            if existing.suffix != ".json":
+                continue
+            if self.load(existing.stem).name == name:
+                raise FileExistsError(f"Run name already exists: {name!r}.")
 
     def load(self, run_id: str) -> RunRecord:
         """Load schema 1 as nested dataclasses, without modifying the saved file."""

@@ -2,10 +2,10 @@
 
 **Diff your PyTorch training runs.**
 
-TrainLens is a local CLI for comparing PyTorch training runs. The current project
-includes the package, CLI skeleton, RunRecord model, and local RunStore.
-`trainlens --help` works; CLI run execution, listing, comparison, and CUDA
-instrumentation are not implemented.
+TrainLens is a local CLI for comparing PyTorch training runs. The initial non-CUDA
+`trainlens run` workflow records script execution and metadata locally. CUDA peak
+memory instrumentation, listing, comparison, and reports remain future work;
+this is not the complete v0.1 workflow.
 
 ## Development
 
@@ -37,6 +37,45 @@ than relying on the repository root being importable. Package metadata, the
 
 Read [AGENTS.md](AGENTS.md), the [v0.1 specification](docs/spec-v0.1.md), and
 [ADR 0001](docs/adr/0001-bootstrap-instrumentation.md) before implementation.
+
+## Record a script run
+
+```sh
+trainlens run --name baseline -- python train.py --epochs 5
+trainlens run --name experiment -- .venv/bin/python scripts/train.py "hello world" ""
+```
+
+The name and `--` separator are required. Everything after `--` is the original
+Python command, with argument boundaries preserved. This first workflow accepts
+`python`, `python3`, versioned Python names, or paths to those executables, followed
+by a `.py` script. Interpreter flags, `-m`, `-c`, stdin programs, arbitrary commands,
+shell wrappers, and distributed launchers are unsupported.
+
+The selected Python must have TrainLens importable. It runs a fresh TrainLens
+child which executes the script in that same process; TrainLens does not substitute
+the parent's interpreter. The script starts in the invocation cwd, can import
+sibling modules, and inherits stdin/stdout/stderr. TrainLens diagnostics go to
+stderr, leaving stdout for the script.
+
+The parent collects Git state before execution and measures child wall time using
+a monotonic clock. The child collects startup environment metadata with the existing
+collector. Private temporary JSON files carry that metadata and are removed after
+the child exits; they are not part of the persisted record format. PyTorch may be
+imported before the script, so this is not transparent direct-Python equivalence.
+
+After the child exits, TrainLens saves one final RunRecord under the invocation
+cwd's `.trainlens`, including original command, UTC timestamps, runtime, observed
+exit code, outcome, available metadata, and diagnostics. CUDA peaks remain explicitly
+`not_collected`, never fake zeros. Nonzero script exits and tracebacks remain visible
+and produce failed records when storage works. Missing child metadata stays unknown
+with a warning; it does not change the observed child exit outcome.
+
+Obvious duplicate names and storage failures are checked before execution. Save
+rechecks duplicates and never replaces an existing record. A storage failure after
+training is reported as a recording error and makes the CLI return non-success.
+These checks do not reserve names against concurrent writers. Initial record
+persistence, record updates, signal-forwarding policy, and crash recovery are not
+implemented; abrupt supervisor termination can leave no saved record.
 
 ## Local run storage
 
@@ -89,8 +128,8 @@ python_executable = collect_python_executable()  # RunRecord.python_executable
 git = collect_git(invocation_cwd)  # The caller supplies the original project cwd.
 ```
 
-Environment helpers observe their calling interpreter. The future bootstrap must
-call them in the selected training process. PyTorch is imported only when collecting;
+Environment helpers observe their calling interpreter. The internal bootstrap child
+calls them in the selected training process. PyTorch is imported only when collecting;
 it is not an installation dependency. Missing imports and query failures preserve
 unknown fields as `None` and append collection warnings, without changing training
 failure information. A PyTorch build without CUDA records CUDA availability as
@@ -122,6 +161,6 @@ unwinds. This is an internal primitive for a one-shot bootstrap process, not an
 isolation sandbox or a facility for concurrent runs; imported modules and other
 script side effects remain in the process.
 
-This foundation does not launch another interpreter, collect metadata or CUDA
-peaks, persist records, or provide the `trainlens run` supervisor. Instrumentation
-and supervisor integration remain future work.
+This execution primitive does not launch another interpreter, collect metadata or
+CUDA peaks, or persist records. The run supervisor launches the selected interpreter's
+private child entry point, which calls this primitive directly.
