@@ -4,8 +4,8 @@
 
 TrainLens is a local CLI for comparing PyTorch training runs. The current project
 includes the package, CLI skeleton, RunRecord model, and local RunStore.
-`trainlens --help` works;
-run execution, listing, comparison, and CUDA instrumentation are not implemented.
+`trainlens --help` works; CLI run execution, listing, comparison, and CUDA
+instrumentation are not implemented.
 
 ## Development
 
@@ -106,3 +106,22 @@ Git collection uses the supplied cwd, records the commit and whole-worktree dirt
 state (including staged and untracked changes), and excludes that cwd's `.trainlens`
 subtree. It does not edit Git configuration or ignore files. Missing Git or command
 failures preserve known fields and explain unavailable values through `GitInfo`.
+
+## Internal bootstrap foundation
+
+`trainlens.bootstrap.execute_script(script_path, args, invocation_cwd=...)`
+executes a `.py` script as `__main__` in the calling interpreter. Relative script
+paths are resolved against the supplied invocation cwd. Arguments remain separate
+strings, the script receives `__file__`, and its directory is available for sibling
+imports without becoming the working directory. The script may change cwd itself.
+
+The function returns `None` on normal completion and propagates `SystemExit` and
+user exceptions. It leaves stdin/stdout/stderr attached as supplied by the caller.
+Its temporary argv, import path, and cwd changes are restored when execution
+unwinds. This is an internal primitive for a one-shot bootstrap process, not an
+isolation sandbox or a facility for concurrent runs; imported modules and other
+script side effects remain in the process.
+
+This foundation does not launch another interpreter, collect metadata or CUDA
+peaks, persist records, or provide the `trainlens run` supervisor. Instrumentation
+and supervisor integration remain future work.
