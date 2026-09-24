@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -335,3 +336,84 @@ def test_partial_write_failure_removes_new_record_and_preserves_error(
     assert caught.value is error
     assert not target.exists()
     assert existing.read_bytes() == original
+
+
+@pytest.mark.parametrize("existing_directory", [None, ".trainlens", ".trainlens/runs"])
+def test_list_empty_store_does_not_create_directories(tmp_path, existing_directory):
+    if existing_directory is not None:
+        (tmp_path / existing_directory).mkdir(parents=True)
+    before = sorted(tmp_path.rglob("*"))
+
+    assert RunStore(tmp_path).list_records() == []
+    assert sorted(tmp_path.rglob("*")) == before
+
+
+def test_list_restores_records_by_start_time_without_modifying_files(tmp_path, record):
+    store = RunStore(tmp_path)
+    starts = [
+        ("z-unknown", None),
+        ("b-tie", "2026-09-21T00:00:00Z"),
+        ("newest", "2026-09-21T00:00:00.1+00:00"),
+        ("a-tie", "2026-09-21T00:00:00.000000+00:00"),
+        ("oldest", "2026-09-20T23:59:59+00:00"),
+        ("a-unknown", None),
+    ]
+    originals = {}
+    for index, (run_id, started_at) in enumerate(starts):
+        saved = replace(record, run_id=run_id, name=run_id, started_at=started_at)
+        originals[run_id] = saved
+        path = store.save(saved)
+        os.utime(path, (100 + index, 100 + index))
+    (store.runs_dir / "notes.txt").write_text("not JSON")
+    (store.runs_dir / "nested").mkdir()
+    (store.runs_dir / "nested" / "ignored.json").write_text("not JSON")
+    files = [path for path in store.runs_dir.rglob("*") if path.is_file()]
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files}
+
+    for _ in range(2):
+        loaded = store.list_records()
+        assert [item.run_id for item in loaded] == [
+            "newest",
+            "a-tie",
+            "b-tie",
+            "oldest",
+            "a-unknown",
+            "z-unknown",
+        ]
+        assert all(item == originals[item.run_id] for item in loaded)
+        assert all(isinstance(item.environment, EnvironmentInfo) for item in loaded)
+    assert {
+        path: (path.read_bytes(), path.stat().st_mtime_ns) for path in files
+    } == before
+
+
+def test_list_rejects_storage_and_record_paths_outside_store(tmp_path, record):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    project = tmp_path / "project"
+    project.mkdir()
+    link = project / ".trainlens"
+    link.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="outside"):
+        RunStore(project).list_records()
+    link.unlink()
+
+    store = RunStore(project)
+    path = store.save(record)
+    original = path.read_bytes()
+    external = outside / "record.json"
+    external.write_bytes(original)
+    path.unlink()
+    path.symlink_to(external)
+    with pytest.raises(ValueError, match="outside"):
+        store.list_records()
+    assert external.read_bytes() == original
+
+
+def test_list_propagates_directory_scan_error(tmp_path, monkeypatch):
+    def fail_scan(path):
+        raise PermissionError("Cannot read saved runs")
+
+    monkeypatch.setattr(Path, "iterdir", fail_scan)
+    with pytest.raises(PermissionError, match="Cannot read saved runs"):
+        RunStore(tmp_path).list_records()

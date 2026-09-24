@@ -3,6 +3,7 @@
 import json
 import math
 from dataclasses import asdict, fields
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,22 @@ def _reject_constant(value: str) -> None:
     raise ValueError(f"Invalid JSON numeric constant: {value}.")
 
 
+def _start_time(record: RunRecord) -> tuple[bool, datetime]:
+    if record.started_at is None:
+        return False, datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        # Accept UTC's Z spelling on Python 3.10 as well as numeric offsets.
+        started = datetime.fromisoformat(record.started_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(
+            f"Invalid started_at for run {record.run_id!r}: {record.started_at!r}."
+        ) from error
+    # Saved timestamps represent UTC; never infer the reader's local timezone.
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return True, started
+
+
 class RunStore:
     """Save new runs and load by ID under project_dir/.trainlens/runs.
 
@@ -212,3 +229,21 @@ class RunStore:
         if record.run_id != run_id:
             raise ValueError(f"Run identity in {path} does not match {run_id!r}.")
         return record
+
+    def list_records(self) -> list[RunRecord]:
+        """Read runs newest first, unknown starts last, breaking ties by run ID.
+
+        An absent store is empty. Invalid records and filesystem errors propagate;
+        enumeration never creates directories or repairs saved data.
+        """
+        if not self.runs_dir.resolve().is_relative_to(self.project_dir):
+            raise ValueError(
+                "Storage directory resolves outside the project directory."
+            )
+        try:
+            paths = sorted(self.runs_dir.iterdir())
+        except FileNotFoundError:
+            return []
+        records = [self.load(path.stem) for path in paths if path.suffix == ".json"]
+        # Stable sorting keeps filename/run-ID order for equal or missing starts.
+        return sorted(records, key=_start_time, reverse=True)
