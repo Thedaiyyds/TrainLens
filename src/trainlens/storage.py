@@ -253,3 +253,16 @@ class RunStore:
         records = [self.load(path.stem) for path in paths if path.suffix == ".json"]
         # Stable sorting keeps filename/run-ID order for equal or missing starts.
         return sorted(records, key=_start_time, reverse=True)
+
+    def resolve(self, selector: str) -> RunRecord:
+        """Resolve an exact saved name or ID without preferring either namespace."""
+        matches = [
+            record
+            for record in self.list_records()
+            if selector == record.name or selector == record.run_id
+        ]
+        if not matches:
+            raise FileNotFoundError(f"No saved run matches selector {selector!r}.")
+        if len(matches) > 1:
+            raise ValueError(f"Ambiguous run selector {selector!r}.")
+        return matches[0]

@@ -1,6 +1,5 @@
 import re
 
-import pytest
 from typer.testing import CliRunner
 
 from trainlens.cli import app
@@ -20,9 +19,8 @@ def test_help() -> None:
     assert "--help" in output
 
 
-@pytest.mark.parametrize("command", ["diff"])
-def test_unimplemented_commands_are_rejected(command: str) -> None:
-    result = runner.invoke(app, [command])
+def test_unknown_command_is_rejected() -> None:
+    result = runner.invoke(app, ["not-a-command"])
 
     assert result.exit_code != 0
     assert "No such command" in result.output

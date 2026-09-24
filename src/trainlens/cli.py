@@ -89,3 +89,17 @@ def list_runs() -> None:
         typer.echo(
             "  ".join(cell.ljust(width) for cell, width in zip(row, widths)).rstrip()
         )
+
+
+@app.command("diff")
+def diff_runs(baseline: str, experiment: str) -> None:
+    """Compare saved runs by exact name or ID; emit Markdown to stdout."""
+    from trainlens.report import render_comparison
+
+    try:
+        store = RunStore()
+        report = render_comparison(store.resolve(baseline), store.resolve(experiment))
+    except (OSError, ValueError) as error:
+        typer.echo(f"TrainLens: could not compare runs: {error}", err=True)
+        raise typer.Exit(1) from error
+    typer.echo(report, nl=False)

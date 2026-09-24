@@ -420,3 +420,45 @@ def test_list_propagates_directory_scan_error(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "iterdir", fail_scan)
     with pytest.raises(PermissionError, match="Cannot read saved runs"):
         RunStore(tmp_path).list_records()
+
+
+def test_resolve_exact_name_or_id_and_same_record_matching_both(tmp_path, record):
+    store = RunStore(tmp_path)
+    first = replace(record, run_id="baseline-id", name="baseline")
+    second = replace(record, run_id="experiment", name="experiment")
+    paths = [store.save(item) for item in (first, second)]
+    before = {path: path.read_bytes() for path in paths}
+
+    assert store.resolve("baseline") == first
+    assert store.resolve("baseline-id") == first
+    assert store.resolve("experiment") == second
+    for missing in ("base", "BASELINE", " baseline", "nonexistent"):
+        with pytest.raises(FileNotFoundError, match="No saved run"):
+            store.resolve(missing)
+    assert {path: path.read_bytes() for path in paths} == before
+
+
+def test_resolve_name_id_collision_is_ambiguous(tmp_path, record):
+    store = RunStore(tmp_path)
+    store.save(replace(record, run_id="first", name="collision"))
+    store.save(replace(record, run_id="collision", name="second"))
+
+    with pytest.raises(ValueError, match="Ambiguous.*collision"):
+        store.resolve("collision")
+
+
+def test_resolve_empty_store_does_not_create_directories(tmp_path):
+    with pytest.raises(FileNotFoundError, match="No saved run"):
+        RunStore(tmp_path).resolve("missing")
+    assert not (tmp_path / ".trainlens").exists()
+
+
+def test_resolve_does_not_skip_corrupt_records(tmp_path, record):
+    store = RunStore(tmp_path)
+    store.save(record)
+    bad = store.runs_dir / "broken.json"
+    bad.write_text("{")
+
+    with pytest.raises(json.JSONDecodeError):
+        store.resolve(record.run_id)
+    assert bad.read_text() == "{"

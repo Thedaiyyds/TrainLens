@@ -4,8 +4,9 @@
 
 TrainLens is a local CLI for comparing PyTorch training runs. The initial non-CUDA
 `trainlens run` workflow records script execution and metadata locally, and
-`trainlens list` displays saved runs. CUDA peak memory instrumentation, comparison,
-and reports remain future work; this is not the complete v0.1 workflow.
+`trainlens list` displays saved runs. `trainlens diff` compares saved records in
+Markdown. CUDA peak memory instrumentation remains future work; this is not the
+complete v0.1 workflow.
 
 ## Development
 
@@ -93,6 +94,37 @@ Listing reads historical records only: it does not execute training, collect fre
 metadata, or require PyTorch/CUDA. Invalid records produce a diagnostic on stderr
 and a nonzero exit, leaving the files untouched. Table spacing is for human reading,
 not a stable machine-readable format.
+
+## Compare saved runs
+
+```sh
+trainlens diff baseline experiment
+trainlens diff baseline experiment > comparison.md
+```
+
+The first selector is the baseline; the second is the experiment. Each must exactly
+match a saved name or run ID. Missing or ambiguous selectors fail clearly, including
+when a name matches another run's ID. Errors go to stderr; stdout contains only the
+Markdown report, so shell redirection produces a clean report file.
+
+The report shows identities, original argument arrays, working directories,
+lifecycle, environment, Git state, runtime, saved CUDA peaks, and diagnostics.
+Delta means `experiment - baseline`; percentage means `delta / baseline * 100`.
+A zero baseline permits a delta but has `N/A` percentage. Missing measurements
+produce `N/A` comparisons, and measured zeros remain numeric. Runtime is process
+wall time including bootstrap overhead, not isolated training-loop time.
+
+CUDA rows use exact saved device identifiers, without guessing hardware pairing or
+summing device peaks. Numeric comparison requires both values and equal, known
+measurement scopes. Different or unknown scopes leave values visible with `N/A`
+comparisons and an explanation. Current runs still record CUDA peaks as
+`not_collected` until instrumentation is implemented.
+
+Reports use saved data only: no training is rerun, no current environment or Git
+state is queried, and the reader needs no PyTorch/CUDA. Historical warnings and
+training failures belong in the report, not stderr. Bad records fail without being
+rewritten. The report describes observations and does not declare a winner; its
+Markdown layout is not a stable machine-readable API.
 
 ## Local run storage
 
