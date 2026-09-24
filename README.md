@@ -3,9 +3,9 @@
 **Diff your PyTorch training runs.**
 
 TrainLens is a local CLI for comparing PyTorch training runs. The initial non-CUDA
-`trainlens run` workflow records script execution and metadata locally. CUDA peak
-memory instrumentation, listing, comparison, and reports remain future work;
-this is not the complete v0.1 workflow.
+`trainlens run` workflow records script execution and metadata locally, and
+`trainlens list` displays saved runs. CUDA peak memory instrumentation, comparison,
+and reports remain future work; this is not the complete v0.1 workflow.
 
 ## Development
 
@@ -76,6 +76,23 @@ training is reported as a recording error and makes the CLI return non-success.
 These checks do not reserve names against concurrent writers. Initial record
 persistence, record updates, signal-forwarding policy, and crash recovery are not
 implemented; abrupt supervisor termination can leave no saved record.
+
+## List saved runs
+
+```sh
+trainlens list
+```
+
+Reads the current directory's saved runs and prints ID, name, start time, status,
+runtime in seconds, and exit code to stdout. Runs with known start times appear
+newest first, followed by unknown start times. Missing values display as `N/A`;
+measured zero remains zero. An empty store produces only the table header and
+does not create storage directories.
+
+Listing reads historical records only: it does not execute training, collect fresh
+metadata, or require PyTorch/CUDA. Invalid records produce a diagnostic on stderr
+and a nonzero exit, leaving the files untouched. Table spacing is for human reading,
+not a stable machine-readable format.
 
 ## Local run storage
 

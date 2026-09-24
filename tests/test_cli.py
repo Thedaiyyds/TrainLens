@@ -20,7 +20,7 @@ def test_help() -> None:
     assert "--help" in output
 
 
-@pytest.mark.parametrize("command", ["list", "diff"])
+@pytest.mark.parametrize("command", ["diff"])
 def test_unimplemented_commands_are_rejected(command: str) -> None:
     result = runner.invoke(app, [command])
 
