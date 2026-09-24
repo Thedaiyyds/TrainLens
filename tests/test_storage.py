@@ -348,12 +348,15 @@ def test_list_empty_store_does_not_create_directories(tmp_path, existing_directo
     assert sorted(tmp_path.rglob("*")) == before
 
 
-def test_list_restores_records_by_start_time_without_modifying_files(tmp_path, record):
+@pytest.mark.parametrize("fraction", ["1", "1234", "123456"])
+def test_list_restores_records_by_start_time_without_modifying_files(
+    tmp_path, record, fraction
+):
     store = RunStore(tmp_path)
     starts = [
         ("z-unknown", None),
         ("b-tie", "2026-09-21T00:00:00Z"),
-        ("newest", "2026-09-21T00:00:00.1+00:00"),
+        ("newest", f"2026-09-21T00:00:00.{fraction}+00:00"),
         ("a-tie", "2026-09-21T00:00:00.000000+00:00"),
         ("oldest", "2026-09-20T23:59:59+00:00"),
         ("a-unknown", None),

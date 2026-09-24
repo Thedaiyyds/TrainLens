@@ -2,6 +2,7 @@
 
 import json
 import math
+import re
 from dataclasses import asdict, fields
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,8 +131,13 @@ def _start_time(record: RunRecord) -> tuple[bool, datetime]:
     if record.started_at is None:
         return False, datetime.min.replace(tzinfo=timezone.utc)
     try:
-        # Accept UTC's Z spelling on Python 3.10 as well as numeric offsets.
-        started = datetime.fromisoformat(record.started_at.replace("Z", "+00:00"))
+        # Use numeric UTC and six fractional-second digits for Python 3.10.
+        # Normalize only the sorting input, leaving the saved timestamp untouched.
+        value = record.started_at.replace("Z", "+00:00")
+        value = re.sub(
+            r"(\.\d{1,5})(?=[+-]|$)", lambda match: match[1].ljust(7, "0"), value
+        )
+        started = datetime.fromisoformat(value)
     except ValueError as error:
         raise ValueError(
             f"Invalid started_at for run {record.run_id!r}: {record.started_at!r}."
