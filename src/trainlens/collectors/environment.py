@@ -12,12 +12,16 @@ def collect_python_executable() -> str | None:
     return sys.executable or None
 
 
-def collect_environment(*, diagnostics: RunDiagnostics) -> EnvironmentInfo:
+def collect_environment(
+    *, diagnostics: RunDiagnostics, include_cuda_inventory: bool = True
+) -> EnvironmentInfo:
     """Collect current-process metadata without initializing PyTorch CUDA.
 
     Call from the selected training interpreter, not its CLI supervisor. CUDA
     builds defer availability/device queries until CUDA is already initialized;
-    a later call after script execution can fill those fields. Missing metadata
+    a later call after script execution can fill those fields. The bootstrap also
+    disables inventory explicitly at startup, even if a Python startup hook has
+    already initialized CUDA. Missing metadata
     adds collection warnings without changing the training failure message.
     """
     result = EnvironmentInfo()
@@ -50,6 +54,12 @@ def collect_environment(*, diagnostics: RunDiagnostics) -> EnvironmentInfo:
     if result.cuda_build_version is None:
         result.cuda_available = False
         result.gpus = []
+        return result
+
+    if not include_cuda_inventory:
+        diagnostics.collection_warnings.append(
+            "Startup CUDA availability and GPU inventory deferred until script exit."
+        )
         return result
 
     try:

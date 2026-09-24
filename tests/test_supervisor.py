@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from trainlens import supervisor
 from trainlens.cli import app
-from trainlens.models import EnvironmentInfo, GitInfo
+from trainlens.models import EnvironmentInfo, GitInfo, RunMetrics
 from trainlens.storage import RunStore
 
 
@@ -22,7 +22,9 @@ def project(tmp_path, monkeypatch):
 
 def payload(request):
     return {
-        "payload_version": 1,
+        "payload_version": 2,
+        "phase": "final",
+        "metrics": asdict(RunMetrics([], unavailable_reason="cuda_not_initialized")),
         "run_id": request["run_id"],
         "python_executable": "/selected/child/python",
         "environment": asdict(EnvironmentInfo(python_version="child-only-version")),
@@ -33,7 +35,7 @@ def payload(request):
 
 @pytest.mark.parametrize("exit_code", [0, 7])
 @pytest.mark.parametrize(
-    "result", ["missing", "bad-json", "bad-environment", "wrong-id"]
+    "result", ["missing", "bad-json", "bad-environment", "bad-metrics", "wrong-id"]
 )
 def test_payload_failure_preserves_observed_outcome(
     project, monkeypatch, result, exit_code
@@ -51,6 +53,8 @@ def test_payload_failure_preserves_observed_outcome(
             data["environment"]["cuda_available"] = "not a boolean"
         if result == "wrong-id":
             data["run_id"] = "different-run"
+        if result == "bad-metrics":
+            data["metrics"] = {"cuda_devices": []}
         if result != "missing":
             Path(request["result_path"]).write_text(
                 "{" if result == "bad-json" else json.dumps(data)
@@ -97,7 +101,7 @@ def test_valid_child_payload_and_monotonic_timing(
     assert record.runtime_seconds == 2.5
     assert record.diagnostics.collection_warnings == ["child warning"]
     assert record.metrics.cuda_devices == []
-    assert record.metrics.unavailable_reason == "not_collected"
+    assert record.metrics.unavailable_reason == "cuda_not_initialized"
     assert RunStore(project).load(record.run_id) == record
 
 

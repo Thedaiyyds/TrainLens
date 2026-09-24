@@ -14,7 +14,7 @@ from pathlib import Path
 
 from trainlens._run_payload import decode_result
 from trainlens.collectors.git import collect_git
-from trainlens.models import RunRecord
+from trainlens.models import RunMetrics, RunRecord
 from trainlens.storage import RunStore
 
 
@@ -131,12 +131,20 @@ def supervise_run(
                     "may have failed."
                 )
             else:
-                environment, executable, warnings, failure_message = payload
-                record.environment = environment
-                if executable is not None:
-                    record.python_executable = executable
-                record.diagnostics.collection_warnings.extend(warnings)
-                record.diagnostics.failure_message = failure_message
+                record.environment = payload.environment
+                if payload.python_executable is not None:
+                    record.python_executable = payload.python_executable
+                record.diagnostics.collection_warnings.extend(payload.warnings)
+                record.diagnostics.failure_message = payload.failure_message
+                if payload.phase == "final":
+                    record.metrics = payload.metrics
+                else:
+                    record.metrics = RunMetrics(
+                        [], unavailable_reason="finalization_missing"
+                    )
+                    record.diagnostics.collection_warnings.append(
+                        "Only startup metadata received; final CUDA collection is missing."
+                    )
             if record.status == "failed" and not record.diagnostics.failure_message:
                 record.diagnostics.failure_message = (
                     f"Child exited with code {record.exit_code}"

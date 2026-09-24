@@ -80,6 +80,19 @@ def test_cuda_build_defers_queries_until_initialized(monkeypatch):
     assert "deferred" in diagnostics.collection_warnings[0]
 
 
+def test_startup_inventory_is_disabled_even_if_cuda_is_initialized(monkeypatch):
+    cuda = fake_torch(monkeypatch, initialized=True)
+    diagnostics = RunDiagnostics()
+    info = environment.collect_environment(
+        diagnostics=diagnostics, include_cuda_inventory=False
+    )
+    assert info.cuda_build_version == "12.4"
+    assert info.cuda_available is None
+    assert info.gpus is None
+    assert not cuda.mock_calls
+    assert "Startup" in diagnostics.collection_warnings[0]
+
+
 def test_initialized_cuda_inventory_is_metadata_only(monkeypatch):
     cuda = fake_torch(monkeypatch, initialized=True)
     diagnostics = RunDiagnostics()

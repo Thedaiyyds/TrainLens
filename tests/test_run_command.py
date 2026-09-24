@@ -224,6 +224,8 @@ def test_selected_virtual_environment_supplies_execution_and_metadata(
         "PyTorch" in warning for warning in record.diagnostics.collection_warnings
     )
     assert record.status == "succeeded"
+    assert record.metrics.unavailable_reason == "pytorch_unavailable"
+    assert record.metrics.cuda_devices == []
 
 
 def test_selected_interpreter_without_trainlens_records_bootstrap_failure(
@@ -285,3 +287,132 @@ def test_separator_is_required_before_training_command(tmp_path):
     assert result.returncode != 0
     assert "--" in result.stderr
     assert not (tmp_path / "executed").exists()
+
+
+def test_abrupt_child_exit_preserves_startup_but_has_no_final_metrics(tmp_path):
+    (tmp_path / "train.py").write_text("import os\nos._exit(7)\n")
+    result = cli(tmp_path, "run", "--name", "abrupt", "--", sys.executable, "train.py")
+    assert result.returncode != 0
+    [record] = records(tmp_path)
+    assert record.status == "failed"
+    assert record.exit_code == 7
+    assert record.environment.python_version
+    assert record.python_executable == sys.executable
+    assert record.metrics.cuda_devices == []
+    assert record.metrics.unavailable_reason == "finalization_missing"
+    assert any(
+        "Only startup" in warning for warning in record.diagnostics.collection_warnings
+    )
+
+
+@pytest.mark.parametrize(
+    "ending,code",
+    [
+        ("pass", 0),
+        ("raise SystemExit(0)", 0),
+        ("raise SystemExit(7)", 7),
+        ("raise RuntimeError('boom')", 1),
+    ],
+)
+@pytest.mark.parametrize("query_failure", [False, True])
+def test_mock_cuda_in_real_selected_child_reaches_saved_record_and_report(
+    tmp_path, selected_python, ending, code, query_failure
+):
+    python, site = selected_python
+    source = Path(__file__).resolve().parents[1] / "src"
+    (site / "trainlens-test.pth").write_text(f"{source}\n", encoding="utf-8")
+    # A fake installed only in the selected interpreter proves the parent cannot
+    # supply the metrics. Queries also require state set by the training script.
+    (site / "torch.py").write_text(
+        """
+import os
+from types import SimpleNamespace
+__version__ = "fake-test-torch"
+version = SimpleNamespace(cuda="fake-test-cuda")
+class FakeCUDA:
+    initialized = False
+    training_pid = None
+    fail = False
+    allocated = None
+    def is_initialized(self):
+        return self.initialized
+    def guard(self):
+        assert self.initialized and self.training_pid == os.getpid()
+    def is_available(self):
+        self.guard()
+        return True
+    def device_count(self):
+        self.guard()
+        return 1
+    def get_device_name(self, index):
+        self.guard()
+        return "Fake GPU"
+    def max_memory_allocated(self, index):
+        self.guard()
+        return self.allocated
+    def max_memory_reserved(self, index):
+        self.guard()
+        if self.fail:
+            raise RuntimeError("reserved query failed")
+        return 4096
+cuda = FakeCUDA()
+""",
+        encoding="utf-8",
+    )
+    (tmp_path / "train.py").write_text(
+        "import os, torch\n"
+        "assert not torch.cuda.initialized\n"
+        "torch.cuda.initialized = True\n"
+        "torch.cuda.training_pid = os.getpid()\n"
+        "torch.cuda.allocated = 0\n"
+        f"torch.cuda.fail = {query_failure!r}\n" + ending + "\n",
+        encoding="utf-8",
+    )
+    result = cli(tmp_path, "run", "--name", "measured", "--", str(python), "train.py")
+    assert (result.returncode == 0) == (code == 0), result.stderr
+    [record] = records(tmp_path)
+    assert record.schema_version == 1
+    assert record.status == ("succeeded" if code == 0 else "failed")
+    assert record.exit_code == code
+    assert record.environment.cuda_available is True
+    assert record.environment.gpus[0].name == "Fake GPU"
+    assert record.environment.python_version
+    assert record.metrics.measurement_scope == "bootstrap_to_script_exit_v1"
+    [device] = record.metrics.cuda_devices
+    assert device.device == "cuda:0"
+    assert device.peak_allocated_bytes == 0
+    assert device.peak_reserved_bytes == (None if query_failure else 4096)
+    if query_failure:
+        assert "reserved query failed" in device.unavailable_reason
+        assert any(
+            "reserved query failed" in item
+            for item in record.diagnostics.collection_warnings
+        )
+    if code == 1:
+        assert "Traceback (most recent call last)" in result.stderr
+        assert "RuntimeError: boom" in result.stderr
+        assert record.diagnostics.failure_message == "RuntimeError: boom"
+    elif code == 7:
+        assert record.diagnostics.failure_message == "SystemExit: 7"
+    else:
+        assert record.diagnostics.failure_message is None
+
+    # Existing schema-1 records remain readable alongside newly measured records.
+    store = RunStore(tmp_path)
+    store.save(
+        RunRecord(
+            run_id="historical",
+            name="historical",
+            trainlens_version="0.1.0.dev0",
+            command=["python", "old.py"],
+            cwd=str(tmp_path),
+        )
+    )
+    listed = cli(tmp_path, "list")
+    assert listed.returncode == 0, listed.stderr
+    assert "measured" in listed.stdout and "historical" in listed.stdout
+    report = cli(tmp_path, "diff", "historical", "measured")
+    assert report.returncode == 0, report.stderr
+    assert "0 bytes" in report.stdout
+    assert r"not\_collected" in report.stdout
+    assert ("4096 bytes" in report.stdout) == (not query_failure)

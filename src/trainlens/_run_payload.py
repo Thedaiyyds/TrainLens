@@ -1,9 +1,49 @@
 """Private, ephemeral child transport; independent of the persisted run schema."""
 
-from dataclasses import fields
+from dataclasses import dataclass, fields
 from pathlib import Path
 
-from trainlens.models import EnvironmentInfo, GPUInfo
+from trainlens.models import CUDADeviceMetrics, EnvironmentInfo, GPUInfo, RunMetrics
+
+
+@dataclass
+class ChildResult:
+    environment: EnvironmentInfo
+    python_executable: str | None
+    warnings: list[str]
+    failure_message: str | None
+    phase: str
+    metrics: RunMetrics | None
+
+
+def _decode_metrics(value: object) -> RunMetrics:
+    if not isinstance(value, dict) or value.keys() != {
+        f.name for f in fields(RunMetrics)
+    }:
+        raise ValueError("Invalid child metrics fields")
+    for key in ("measurement_scope", "unavailable_reason"):
+        if value[key] is not None and not isinstance(value[key], str):
+            raise ValueError(f"Invalid child metrics {key}")
+    if not isinstance(value["cuda_devices"], list):
+        raise ValueError("Invalid child CUDA metrics list")
+    devices = []
+    identifiers = set()
+    for device in value["cuda_devices"]:
+        if not isinstance(device, dict) or device.keys() != {
+            f.name for f in fields(CUDADeviceMetrics)
+        }:
+            raise ValueError("Invalid child CUDA metric fields")
+        if not isinstance(device["device"], str) or device["device"] in identifiers:
+            raise ValueError("Invalid or duplicate child CUDA device identifier")
+        identifiers.add(device["device"])
+        reason = device["unavailable_reason"]
+        if reason is not None and not isinstance(reason, str):
+            raise ValueError("Invalid child CUDA metric reason")
+        for key in ("peak_allocated_bytes", "peak_reserved_bytes"):
+            if type(device[key]) not in (int, type(None)):
+                raise ValueError(f"Invalid child CUDA {key}")
+        devices.append(CUDADeviceMetrics(**device))
+    return RunMetrics(**{**value, "cuda_devices": devices})
 
 
 def _strings(value: object) -> bool:
@@ -23,9 +63,7 @@ def validate_request(value: object) -> dict:
     return value
 
 
-def decode_result(
-    value: object, run_id: str
-) -> tuple[EnvironmentInfo, str | None, list[str], str | None]:
+def decode_result(value: object, run_id: str) -> ChildResult:
     expected = {
         "payload_version",
         "run_id",
@@ -33,13 +71,22 @@ def decode_result(
         "python_executable",
         "warnings",
         "failure_message",
+        "phase",
+        "metrics",
     }
     if not isinstance(value, dict) or value.keys() != expected:
         raise ValueError("Invalid child result fields")
-    if type(value["payload_version"]) is not int or value["payload_version"] != 1:
+    if type(value["payload_version"]) is not int or value["payload_version"] != 2:
         raise ValueError("Unsupported child payload version")
     if value["run_id"] != run_id:
         raise ValueError("Child result belongs to a different run")
+    if value["phase"] not in ("startup", "final"):
+        raise ValueError("Invalid child result phase")
+    metrics = None
+    if value["phase"] == "final":
+        metrics = _decode_metrics(value["metrics"])
+    elif value["metrics"] is not None or value["failure_message"] is not None:
+        raise ValueError("Startup payload cannot contain final metrics or failure")
     if not _strings(value["warnings"]):
         raise ValueError("Invalid child warnings")
     for key in ("python_executable", "failure_message"):
@@ -70,9 +117,11 @@ def decode_result(
             ):
                 raise ValueError("Invalid child GPU entry")
             restored.append(GPUInfo(**gpu))
-    return (
+    return ChildResult(
         EnvironmentInfo(**{**env, "gpus": restored}),
         value["python_executable"],
         list(value["warnings"]),
         value["failure_message"],
+        value["phase"],
+        metrics,
     )
