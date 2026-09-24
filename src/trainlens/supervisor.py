@@ -91,6 +91,7 @@ def supervise_run(
     record.started_at = _now()
     try:
         python = _resolve_python(command[0], cwd)
+        record.python_executable = python
         script = cwd / command[1]
         if not script.is_file():
             raise FileNotFoundError(f"Training script not found: {script}")
@@ -132,7 +133,8 @@ def supervise_run(
             else:
                 environment, executable, warnings, failure_message = payload
                 record.environment = environment
-                record.python_executable = executable
+                if executable is not None:
+                    record.python_executable = executable
                 record.diagnostics.collection_warnings.extend(warnings)
                 record.diagnostics.failure_message = failure_message
             if record.status == "failed" and not record.diagnostics.failure_message:

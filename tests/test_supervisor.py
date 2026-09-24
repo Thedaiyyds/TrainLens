@@ -65,17 +65,22 @@ def test_payload_failure_preserves_observed_outcome(
     assert record.exit_code == exit_code
     assert record.status == ("succeeded" if exit_code == 0 else "failed")
     assert record.environment == EnvironmentInfo()
-    assert record.python_executable is None
+    assert record.python_executable == sys.executable
     assert record.diagnostics.collection_warnings
     assert "Child metadata unavailable" in record.diagnostics.collection_warnings[0]
     assert RunStore(project).load(record.run_id) == record
     assert not requests[0].parent.exists()
 
 
-def test_valid_child_payload_and_monotonic_timing(project, monkeypatch):
+@pytest.mark.parametrize("child_executable", ["/selected/child/python", None])
+def test_valid_child_payload_and_monotonic_timing(
+    project, monkeypatch, child_executable
+):
     def child(command, **kwargs):
         request = json.loads(Path(command[-1]).read_text())
-        Path(request["result_path"]).write_text(json.dumps(payload(request)))
+        data = payload(request)
+        data["python_executable"] = child_executable
+        Path(request["result_path"]).write_text(json.dumps(data))
         return subprocess.CompletedProcess(command, 0)
 
     ticks = iter([100.0, 102.5])
@@ -86,11 +91,29 @@ def test_valid_child_payload_and_monotonic_timing(project, monkeypatch):
     )
 
     assert record.environment.python_version == "child-only-version"
-    assert record.python_executable == "/selected/child/python"
+    assert record.python_executable == (
+        sys.executable if child_executable is None else child_executable
+    )
     assert record.runtime_seconds == 2.5
     assert record.diagnostics.collection_warnings == ["child warning"]
     assert record.metrics.cuda_devices == []
     assert record.metrics.unavailable_reason == "not_collected"
+    assert RunStore(project).load(record.run_id) == record
+
+
+def test_unresolved_python_keeps_executable_unknown(project, monkeypatch):
+    monkeypatch.setattr(
+        supervisor.subprocess, "run", lambda *a, **k: pytest.fail("launched")
+    )
+    record = supervisor.supervise_run(
+        "baseline", ["missing/bin/python", "train.py"], invocation_cwd=project
+    )
+
+    assert record.status == "failed"
+    assert record.python_executable is None
+    assert record.exit_code is None
+    assert "Selected Python executable not found" in record.diagnostics.failure_message
+    assert RunStore(project).load(record.run_id) == record
 
 
 def test_launch_failure_is_recorded_without_fabricated_exit_or_environment(
@@ -107,7 +130,7 @@ def test_launch_failure_is_recorded_without_fabricated_exit_or_environment(
     assert record.status == "failed"
     assert record.exit_code is None
     assert record.runtime_seconds is None
-    assert record.python_executable is None
+    assert record.python_executable == sys.executable
     assert "Launch/bootstrap failure" in record.diagnostics.failure_message
     assert RunStore(project).load(record.run_id) == record
 

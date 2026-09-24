@@ -244,6 +244,7 @@ def test_selected_interpreter_without_trainlens_records_bootstrap_failure(
     [record] = records(tmp_path)
     assert record.status == "failed"
     assert record.exit_code != 0
+    assert record.python_executable == str(python)
     assert record.environment.python_version is None
     assert record.diagnostics.collection_warnings
 
