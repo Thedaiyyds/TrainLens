@@ -2,11 +2,12 @@
 
 **Diff your PyTorch training runs.**
 
-TrainLens is a local CLI for comparing PyTorch training runs. The initial non-CUDA
+TrainLens is a local CLI for comparing PyTorch training runs. The
 `trainlens run` workflow records script execution and metadata locally, and
 `trainlens list` displays saved runs. `trainlens diff` compares saved records in
-Markdown. CUDA peak memory instrumentation remains future work; this is not the
-complete v0.1 workflow.
+Markdown. The training child now includes CUDA allocator peak instrumentation.
+Real Linux + NVIDIA validation has **not** been completed: CUDA correctness is not
+yet accepted, and v0.1 is not complete.
 
 ## Development
 
@@ -59,15 +60,18 @@ sibling modules, and inherits stdin/stdout/stderr. TrainLens diagnostics go to
 stderr, leaving stdout for the script.
 
 The parent collects Git state before execution and measures child wall time using
-a monotonic clock. The child collects startup environment metadata with the existing
-collector. Private temporary JSON files carry that metadata and are removed after
-the child exits; they are not part of the persisted record format. PyTorch may be
+a monotonic clock. The child collects startup environment metadata, then refreshes
+it and queries allocator peaks after the script returns or unwinds. Useful startup
+fields survive a failed or partial refresh. Private temporary JSON files distinguish
+startup metadata from final observations and are removed after the child exits;
+they are not part of the persisted record format. PyTorch may be
 imported before the script, so this is not transparent direct-Python equivalence.
 
 After the child exits, TrainLens saves one final RunRecord under the invocation
 cwd's `.trainlens`, including original command, UTC timestamps, runtime, observed
-exit code, outcome, available metadata, and diagnostics. CUDA peaks remain explicitly
-`not_collected`, never fake zeros. Nonzero script exits and tracebacks remain visible
+exit code, outcome, available metadata, and diagnostics. CUDA peaks are per-device
+byte values when available, otherwise explicitly missing with a reason.
+Nonzero script exits and tracebacks remain visible
 and produce failed records when storage works. Missing child metadata stays unknown
 with a warning; it does not change the observed child exit outcome.
 
@@ -117,8 +121,8 @@ wall time including bootstrap overhead, not isolated training-loop time.
 CUDA rows use exact saved device identifiers, without guessing hardware pairing or
 summing device peaks. Numeric comparison requires both values and equal, known
 measurement scopes. Different or unknown scopes leave values visible with `N/A`
-comparisons and an explanation. Current runs still record CUDA peaks as
-`not_collected` until instrumentation is implemented.
+comparisons and an explanation. Historical records with `not_collected` metrics
+remain readable alongside new records.
 
 Reports use saved data only: no training is rerun, no current environment or Git
 state is queried, and the reader needs no PyTorch/CUDA. Historical warnings and
@@ -184,16 +188,52 @@ unknown fields as `None` and append collection warnings, without changing traini
 failure information. A PyTorch build without CUDA records CUDA availability as
 false and an empty CUDA GPU inventory.
 
-For CUDA builds, availability and GPU queries are deferred until PyTorch CUDA is
-already initialized. Before that, these fields remain unknown with a warning; a
-later call after script execution can collect them. No helper initializes CUDA,
-allocates tensors, or reads/resets allocator peaks. Device-name query failures keep
+For CUDA builds, startup collection defers availability and GPU queries. The
+post-script refresh queries them only if PyTorch CUDA is already initialized;
+otherwise these fields remain unknown with a warning. The environment helper does not initialize
+CUDA, allocate tensors, or read/reset allocator peaks. Device-name query failures keep
 the known device identifier with an unknown name.
 
 Git collection uses the supplied cwd, records the commit and whole-worktree dirty
 state (including staged and untracked changes), and excludes that cwd's `.trainlens`
 subtree. It does not edit Git configuration or ignore files. Missing Git or command
 failures preserve known fields and explain unavailable values through `GitInfo`.
+
+## CUDA allocator observations
+
+After script execution, the same child Python process calls
+`torch.cuda.max_memory_allocated(device)` and
+`torch.cuda.max_memory_reserved(device)`. These are PyTorch allocator high-water
+marks in integer bytes, recorded separately for each visible `cuda:N` device.
+Devices are neither summed nor paired by guessed hardware identity. An actual API
+result of zero stays numeric zero. A failed query leaves that value `null`, retains
+any successful companion value, and records a reason and collection warning.
+
+The measurement scope is `bootstrap_to_script_exit_v1`: the fresh child's allocator
+history through the final query after the script returns or unwinds through
+`SystemExit` or a Python exception. TrainLens does not reset peak counters, clear
+the cache, synchronize CUDA, or allocate a tensor to probe it. A script that resets
+its own counters changes the history exposed by the APIs; TrainLens does not undo
+or detect those resets. Queries precede interpreter shutdown and `atexit` handlers.
+
+The collector first checks for a CUDA build and `torch.cuda.is_initialized()`.
+Without PyTorch, a CUDA build, or initialized CUDA, metrics remain unavailable with
+distinct reasons. It does not initialize CUDA just to measure it, and does not
+substitute MPS, ROCm, NVML, or `nvidia-smi` measurements. These peaks are not total
+GPU usage. Alternate/custom allocators and `cudaMallocAsync` equivalence have not
+been validated; this implementation observes the requested APIs without establishing
+a backend compatibility policy.
+
+Final collection is best effort and does not change the script's exit outcome.
+`os._exit`, SIGKILL, or an interpreter crash may bypass finalization. If only startup
+metadata reaches the parent, it is retained with `finalization_missing` metrics and
+a warning. Missing or malformed payloads leave metadata unknown with a warning;
+the parent never queries CUDA to fill the gap. Abrupt supervisor failure can still
+prevent persistence entirely.
+
+Current automated coverage uses CPU tests, fake PyTorch APIs, and real Python
+subprocesses. **Real Linux + NVIDIA validation: NOT RUN.** The follow-up hardware
+validation remains a release gate; mocks do not establish real allocator correctness.
 
 ## Internal bootstrap foundation
 

@@ -4,16 +4,41 @@ import json
 import os
 import sys
 import tempfile
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from pathlib import Path
 
 from trainlens._run_payload import validate_request
 from trainlens.bootstrap import execute_script
+from trainlens.collectors.cuda import collect_cuda_metrics
 from trainlens.collectors.environment import (
     collect_environment,
     collect_python_executable,
 )
-from trainlens.models import EnvironmentInfo, RunDiagnostics
+from trainlens.models import EnvironmentInfo, GPUInfo, RunDiagnostics, RunMetrics
+
+
+def _refresh_environment(
+    startup: EnvironmentInfo, diagnostics: RunDiagnostics
+) -> EnvironmentInfo:
+    refreshed = collect_environment(diagnostics=diagnostics)
+    # Unknown final fields must not erase useful startup observations.
+    values = {
+        field.name: (
+            getattr(refreshed, field.name)
+            if getattr(refreshed, field.name) is not None
+            else getattr(startup, field.name)
+        )
+        for field in fields(EnvironmentInfo)
+    }
+    if refreshed.gpus is not None:
+        names = {gpu.device: gpu.name for gpu in startup.gpus or []}
+        values["gpus"] = [
+            GPUInfo(
+                gpu.device, gpu.name if gpu.name is not None else names.get(gpu.device)
+            )
+            for gpu in refreshed.gpus
+        ]
+    return EnvironmentInfo(**values)
 
 
 def _write_result(path: Path, payload: dict) -> None:
@@ -50,13 +75,17 @@ def run_request(request_path: str | Path) -> None:
     diagnostics = RunDiagnostics()
     environment = EnvironmentInfo()
     try:
-        environment = collect_environment(diagnostics=diagnostics)
+        environment = collect_environment(
+            diagnostics=diagnostics, include_cuda_inventory=False
+        )
     except Exception as error:
         diagnostics.collection_warnings.append(
             f"Environment collection failed: {error}"
         )
     payload = {
-        "payload_version": 1,
+        "payload_version": 2,
+        "phase": "startup",
+        "metrics": None,
         "run_id": request["run_id"],
         "python_executable": collect_python_executable(),
         "environment": asdict(environment),
@@ -77,6 +106,23 @@ def run_request(request_path: str | Path) -> None:
         payload["failure_message"] = f"{type(error).__name__}: {error}"
         raise
     finally:
+        # Even a collector raising SystemExit must not replace the script outcome.
+        try:
+            environment = _refresh_environment(environment, diagnostics)
+        except BaseException as error:
+            diagnostics.collection_warnings.append(
+                f"Final environment collection failed: {type(error).__name__}: {error}"
+            )
+        try:
+            metrics = collect_cuda_metrics(diagnostics=diagnostics)
+        except BaseException as error:
+            diagnostics.collection_warnings.append(
+                f"CUDA metric collection failed: {type(error).__name__}: {error}"
+            )
+            metrics = RunMetrics([], unavailable_reason="collection_failed")
+        payload.update(
+            phase="final", environment=asdict(environment), metrics=asdict(metrics)
+        )
         _publish(result_path, payload)
 
 
