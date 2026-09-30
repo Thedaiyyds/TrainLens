@@ -214,6 +214,56 @@ def test_mock_supported_preflight_reports_environment(mock_preflight, monkeypatc
     assert environment["driver"] and environment["trainlens_commit"]
 
 
+@pytest.mark.parametrize("device_count", [0, 2])
+def test_mock_preflight_requires_exactly_one_visible_device(
+    mock_preflight, device_count
+):
+    mock_preflight.cuda.device_count.return_value = device_count
+    result = runner.preflight()
+    assert result["status"] == "SKIP"
+    assert result["environment"]["device_count"] == device_count
+    assert "exactly one visible CUDA device" in result["reason"]
+    assert "CUDA_VISIBLE_DEVICES" in result["reason"]
+    mock_preflight.cuda.get_device_name.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "returncode,stdout,expected",
+    [(0, "", ""), (0, " M README.md\n", "M README.md"), (1, "", None)],
+)
+def test_diagnostic_command_preserves_successful_empty_output(
+    monkeypatch, returncode, stdout, expected
+):
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=returncode, stdout=stdout),
+    )
+    assert runner._diagnostic_command(["git", "status", "--porcelain"]) == expected
+
+
+@pytest.mark.parametrize(
+    "error", [OSError("git unavailable"), subprocess.TimeoutExpired("git", 10)]
+)
+def test_diagnostic_command_failure_is_unavailable(monkeypatch, error):
+    monkeypatch.setattr(runner.subprocess, "run", Mock(side_effect=error))
+    assert runner._diagnostic_command(["git", "status", "--porcelain"]) is None
+
+
+@pytest.mark.parametrize("status", ["", None])
+def test_mock_preflight_preserves_worktree_status_in_evidence(
+    mock_preflight, monkeypatch, status
+):
+    monkeypatch.setattr(
+        runner,
+        "_diagnostic_command",
+        lambda command: status if "--porcelain" in command else "test-diagnostic",
+    )
+    result = runner.preflight()
+    assert result["status"] == "PASS"
+    assert json.loads(json.dumps(result))["environment"]["worktree_status"] == status
+
+
 def test_mock_preflight_rejects_installed_checkout_mismatch(
     mock_preflight, monkeypatch, tmp_path
 ):

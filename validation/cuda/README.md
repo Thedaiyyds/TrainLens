@@ -6,7 +6,7 @@ included in this change, and TrainLens v0.1 is not yet accepted.
 
 ## Run on a real machine
 
-Use a native Linux machine with an NVIDIA GPU, a working driver, and an existing
+Use a Linux machine with an NVIDIA GPU, a working driver, and an existing
 CUDA-enabled PyTorch environment. Choose a GPU with room for the default 64 MiB
 allocation plus interpreter/context overhead. Install TrainLens into that same
 Python environment from the checkout to be validated:
@@ -14,6 +14,14 @@ Python environment from the checkout to be validated:
 ```sh
 python -m pip install -e '.[dev]'
 python validation/cuda/run_validation.py --output /tmp/trainlens-cuda-evidence.json
+```
+
+Official evidence requires exactly one visible CUDA device. If the visible count
+is not one, preflight reports SKIP. On a machine with multiple GPUs, restrict
+visibility before launching, for example:
+
+```sh
+CUDA_VISIBLE_DEVICES=0 python validation/cuda/run_validation.py
 ```
 
 Run from the repository root. The output file must not already exist; choose a new
@@ -33,6 +41,12 @@ and enabled caching, as the controlled evidence scope described in proposed
 backend, disabled caching, non-Linux platform, missing CUDA, or incomplete
 driver/commit evidence produces SKIP, not an official PASS. This restriction does
 not add a production allocator compatibility policy.
+
+The platform gate checks `platform.system() == "Linux"`; it does not distinguish
+WSL from other Linux environments or add a WSL exclusion to the current SPEC/ADR.
+Passing preflight alone does not establish validation or platform compatibility.
+In evidence JSON, `worktree_status` is an empty string for a successfully observed
+clean worktree, porcelain output for changes, or null when the diagnostic fails.
 
 To adjust allocation sizes or startup timeout:
 

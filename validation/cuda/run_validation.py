@@ -38,7 +38,7 @@ def _require(condition: bool, message: str) -> None:
 def _diagnostic_command(command: list[str]) -> str | None:
     try:
         result = subprocess.run(command, capture_output=True, text=True, timeout=10)
-        return (result.stdout.strip() or None) if result.returncode == 0 else None
+        return result.stdout.strip() if result.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
         return None
 
@@ -106,8 +106,13 @@ def preflight() -> dict:
         if not environment["cuda_build"] or not environment["cuda_available"]:
             return result("SKIP", "NVIDIA CUDA unavailable")
         environment["device_count"] = torch.cuda.device_count()
-        if environment["device_count"] < 1:
-            return result("SKIP", "No visible CUDA devices")
+        if environment["device_count"] != 1:
+            return result(
+                "SKIP",
+                "Official validation requires exactly one visible CUDA device; "
+                f"found {environment['device_count']}. "
+                "Set CUDA_VISIBLE_DEVICES to expose exactly one GPU before launching.",
+            )
         environment["gpu"] = torch.cuda.get_device_name(0)
         environment["driver"] = _diagnostic_command(
             [
@@ -122,7 +127,7 @@ def preflight() -> dict:
     except Exception as error:
         return result("FAIL", f"CUDA environment probe failed: {error}")
     if environment["platform"] != "Linux":
-        return result("SKIP", "Real NVIDIA evidence requires native Linux")
+        return result("SKIP", "Real NVIDIA evidence requires Linux")
     if environment["allocator_backend"] != "native":
         return result(
             "SKIP",
