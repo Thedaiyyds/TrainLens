@@ -1,6 +1,6 @@
 # TrainLens v0.1 specification
 
-Status: proposed for review; implementation has not started.
+Status: proposed for review; implementation is in progress.
 
 **Diff your PyTorch training runs.**
 
