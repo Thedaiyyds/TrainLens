@@ -235,6 +235,11 @@ Current automated coverage uses CPU tests, fake PyTorch APIs, and real Python
 subprocesses. **Real Linux + NVIDIA validation: NOT RUN.** The follow-up hardware
 validation remains a release gate; mocks do not establish real allocator correctness.
 
+The [NVIDIA validation runner](validation/cuda/README.md) now provides controlled
+allocation, peak-retention, fresh-process, exception, and abrupt-exit checks against
+persisted records. Its infrastructure is implemented; real Linux/NVIDIA execution
+remains pending. It uses isolated temporary stores and can save evidence JSON.
+
 ## Internal bootstrap foundation
 
 `trainlens.bootstrap.execute_script(script_path, args, invocation_cwd=...)`
