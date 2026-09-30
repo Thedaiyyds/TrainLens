@@ -13,7 +13,8 @@ acceptance. Local checks below were run during Task #12, not across every platfo
 - [x] Clean temporary venv installs the wheel and runs help/run/list/diff without
   importing checkout code or requiring PyTorch/NVIDIA.
 - [x] Existing Linux CPU editable-install CI passes (main `9ad30ba`).
-- [ ] New Linux Python 3.10 installed-wheel CI step passes; retain its job link.
+- [x] New Linux Python 3.10 installed-wheel CI step passes at `fd2c2fd`; its job
+  link and observed Python 3.10.21 environment are in the compatibility document.
 - [x] Local macOS arm64 no-PyTorch unit-test evidence is recorded.
 - [ ] Real CPU PyTorch workflow is verified on macOS arm64 and Linux CPU with
   exact tested versions recorded; no-PyTorch smoke is insufficient for this gate.

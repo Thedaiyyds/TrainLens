@@ -13,14 +13,15 @@ Status and execution type are separate:
 - **Pending:** no qualifying evidence yet; configured checks alone are not a PASS.
 - **Not supported / out of scope:** excluded from v0.1, regardless of mocks.
 
-Evidence inspected on 2026-09-30:
+Evidence inspected on 2026-09-30. Task #12's implementation is `fd2c2fd`;
+the Linux job below records that commit, and local checks exercised the same code.
 
 | Environment / Python | PyTorch | CUDA / GPU | Validation type | Status and evidence |
 | --- | --- | --- | --- | --- |
 | macOS 26.6.2, arm64 / CPython 3.13.15 | Absent | Unavailable / no NVIDIA validation | Manually executed local automated checks | Verified: full pytest (326 passed), Ruff, 16 focused packaging unit cases. CUDA unit cases use mocks, not GPU evidence. |
 | macOS 26.6.2, arm64 / CPython 3.13.15 | Absent in fresh venv | Explicit unavailable metrics / no NVIDIA | Manually executed local installed-wheel smoke | Verified: `python validation/packaging/run_smoke.py` returned PASS; wheel inspection and fresh-venv help/run/list/diff completed. |
 | GitHub `ubuntu-latest` Linux runner / Python 3.10 job | Not required; CUDA tests mocked | No real CUDA evidence | Automated CI, editable install | Verified at main `9ad30ba`: [successful CI job](https://github.com/Thedaiyyds/TrainLens/actions/runs/36712488558/job/109877356480). That job predates packaging smoke. Exact patch version/runner image must be taken from job logs, not inferred from the selector. |
-| GitHub Linux runner / Python 3.10 job | Absent in smoke venv by assertion | Explicit unavailable metrics / no GPU exercise | Automated installed-wheel smoke | Pending: new CI step requires a successful Task #12 job before it counts as evidence. |
+| GitHub Linux x86_64, kernel 6.17.0-1022-azure, glibc 2.39 / CPython 3.10.21 | Absent in smoke venv by assertion | Explicit unavailable metrics / no GPU exercise | Automated CI, editable tests and installed-wheel smoke | Verified at `fd2c2fd`: [successful job and evidence log](https://github.com/Thedaiyyds/TrainLens/actions/runs/36716866195/job/109891816784), 326 pytest cases, Ruff, wheel inspection, fresh-venv install and console help/run/list/diff PASS. |
 | macOS arm64 and Linux CPU / selected Python + actual CPU PyTorch versions | Present | No CUDA required | SPEC acceptance: two real CPU PyTorch training runs and report | Pending. A no-PyTorch script or fake torch module does not establish this compatibility. |
 | Linux / Python and PyTorch versions to be selected | CUDA-enabled PyTorch | One visible NVIDIA GPU, native allocator | Real [CUDA validation runner](../validation/cuda/README.md) | **NOT RUN / PENDING.** Record OS, GPU, driver, Python, PyTorch, CUDA build, backend, commit, and scenario results. |
 | Other Python versions, OS images, or allocator configurations | Unspecified | Unspecified | Not exercised here | Pending; no support guarantee from package metadata or a pure-Python wheel tag. |
