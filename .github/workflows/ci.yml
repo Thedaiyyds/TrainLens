@@ -26,3 +26,6 @@ jobs:
 
       - name: Run Ruff
         run: ruff check .
+
+      - name: Build wheel and test installed CLI
+        run: python validation/packaging/run_smoke.py

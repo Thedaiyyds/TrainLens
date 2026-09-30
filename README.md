@@ -9,11 +9,24 @@ Markdown. The training child now includes CUDA allocator peak instrumentation.
 Real Linux + NVIDIA validation has **not** been completed: CUDA correctness is not
 yet accepted, and v0.1 is not complete.
 
-## Development
+## Installation and development
 
-The package currently requires Python 3.10 or newer. This is the skeleton's Python
+The package currently requires Python 3.10 or newer. This is the package's Python
 requirement, not a validated PyTorch/CUDA compatibility matrix for v0.1.
-Development of this skeleton requires no PyTorch or NVIDIA software.
+Development and the no-PyTorch workflow require no NVIDIA software. PyTorch is not
+an installation dependency; install it separately in the selected training
+environment when your script requires it.
+
+To install this development version from a downloaded or cloned source checkout:
+
+```sh
+python -m pip install .
+trainlens --help
+```
+
+Use a virtual environment and run the installation from the checkout root.
+No PyPI release is claimed. Keep TrainLens installed in the same Python environment
+selected after `trainlens run ... --`.
 
 From the repository root on macOS or Linux:
 
@@ -39,6 +52,17 @@ than relying on the repository root being importable. Package metadata, the
 
 Read [AGENTS.md](AGENTS.md), the [v0.1 specification](docs/spec-v0.1.md), and
 [ADR 0001](docs/adr/0001-bootstrap-instrumentation.md) before implementation.
+
+The [packaging check](validation/packaging/README.md) builds a real wheel, installs
+it in a fresh temporary environment, and exercises the installed CLI without
+importing the checkout's source. See the [compatibility evidence](docs/compatibility.md)
+and [release checklist](docs/release-checklist-v0.1.md) for verified environments
+and remaining release gates.
+
+v0.1 targets single-process Python/PyTorch scripts. Distributed launchers,
+`torchrun`, DDP/FSDP/DeepSpeed/ZeRO, multi-node training, and official multi-GPU
+validation are out of scope. Automatic tuning, OOM diagnosis, a Web UI, and AI
+explanations are also excluded; see the SPEC for the full non-goals.
 
 ## Record a script run
 
